@@ -1,3 +1,5 @@
+use physics::test_fn;
+
 struct Vector {
     x: felt,
     y: felt,
@@ -10,4 +12,9 @@ struct PhysicalObj {
     position: Vector,
     velocity: Vector,
     acceleration: Vector,
+}
+
+func test() -> felt {
+    test_fn::yafn()
+    // bleh()
 }
