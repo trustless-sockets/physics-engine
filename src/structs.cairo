@@ -6,7 +6,7 @@ struct Vector {
 // The vectors could be pointers for easy updates
 // to avoid having to reallocate the whole struct.
 struct PhysicalObj {
-    type: felt,
+    obj_type: felt,
     position: Vector,
     velocity: Vector,
     acceleration: Vector,

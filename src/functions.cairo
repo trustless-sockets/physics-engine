@@ -1,7 +1,7 @@
-use src::struct::Vector;
-use src::struct::PhysicalObj;
+use src::structs::Vector;
+use src::structs::PhysicalObj;
 
-func addPhysicalObject( object: PhysicalObj, lastObj: PhysicalObj* ) -> (id: felt) {
+func addPhysicalObject( obj: PhysicalObj, lastObj: PhysicalObj ) -> felt {
     // Adds a object to array
     // Returns pointer to the object
     // Separate array to hold acceleration for the physical object
@@ -20,3 +20,6 @@ func updatePhysicalObject( object: PhysicalObj, acceleration: Vector ) -> Physic
     // Create PhysicalObj with newPos and newVel and return
 }
 
+func main() {
+    
+}
