@@ -1,5 +1,5 @@
-use src::structs::Vector;
-use src::structs::PhysicalObj;
+use physics::structs::Vector;
+use physics::structs::PhysicalObj;
 
 func addPhysicalObject( obj: PhysicalObj, lastObj: PhysicalObj ) -> felt {
     // Adds a object to array
@@ -9,15 +9,21 @@ func addPhysicalObject( obj: PhysicalObj, lastObj: PhysicalObj ) -> felt {
 }
 
 func updatePhysicalObject( object: PhysicalObj, acceleration: Vector ) -> PhysicalObj {
-    let newVel = Vector(
-        object.velocity.x + acceleration.x,
-        object.velocity.y + acceleration.y
-    );
-    let newPos = Vector(
-        object.position.x + object.velocity.x,
-        object.position.y + object.velocity.y
-    );
+    
+    let newVel = Vector{
+        x: object.velocity.x + acceleration.x,
+        y: object.velocity.y + acceleration.y,
+    };
+    let newPos = Vector{
+        x: object.position.x + object.velocity.x,
+        y: object.position.y + object.velocity.y,
+    };
     // Create PhysicalObj with newPos and newVel and return
+    PhysicalObj{
+        kind: 0,
+        position: newPos,
+        velocity: newVel,
+    }
 }
 
 func main() {
