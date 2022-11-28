@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use db_utils::Upcast;
 use defs::ids::{GenericParamId, LanguageElementId, MemberId, MemberLongId, StructId};
 use diagnostics::Diagnostics;
@@ -6,11 +8,12 @@ use smol_str::SmolStr;
 use syntax::node::{Terminal, TypedSyntaxNode};
 use utils::ordered_hash_map::OrderedHashMap;
 
+use super::attribute::{ast_attributes_to_semantic, Attribute};
 use super::generics::semantic_generic_params;
 use crate::db::SemanticGroup;
 use crate::diagnostic::SemanticDiagnosticKind::*;
 use crate::diagnostic::SemanticDiagnostics;
-use crate::resolve_path::Resolver;
+use crate::resolve_path::{ResolvedLookback, Resolver};
 use crate::types::{resolve_type, substitute_generics, ConcreteStructId};
 use crate::{semantic, SemanticDiagnostic};
 
@@ -24,6 +27,8 @@ pub struct StructData {
     diagnostics: Diagnostics<SemanticDiagnostic>,
     generic_params: Vec<GenericParamId>,
     members: OrderedHashMap<SmolStr, Member>,
+    attributes: Vec<Attribute>,
+    resolved_lookback: Arc<ResolvedLookback>,
 }
 #[derive(Clone, Debug, Hash, PartialEq, Eq, DebugWithDb)]
 #[debug_db(dyn SemanticGroup + 'static)]
@@ -54,6 +59,19 @@ pub fn struct_members(
     struct_id: StructId,
 ) -> Option<OrderedHashMap<SmolStr, Member>> {
     Some(db.priv_struct_semantic_data(struct_id)?.members)
+}
+
+/// Query implementation of [crate::db::SemanticGroup::struct_attributes].
+pub fn struct_attributes(db: &dyn SemanticGroup, struct_id: StructId) -> Option<Vec<Attribute>> {
+    Some(db.priv_struct_semantic_data(struct_id)?.attributes)
+}
+
+/// Query implementation of [crate::db::SemanticGroup::struct_resolved_lookback].
+pub fn struct_resolved_lookback(
+    db: &dyn SemanticGroup,
+    struct_id: StructId,
+) -> Option<Arc<ResolvedLookback>> {
+    Some(db.priv_struct_semantic_data(struct_id)?.resolved_lookback)
 }
 
 /// Query implementation of [crate::db::SemanticGroup::priv_struct_semantic_data].
@@ -95,7 +113,16 @@ pub fn priv_struct_semantic_data(
         }
     }
 
-    Some(StructData { diagnostics: diagnostics.build(), generic_params, members })
+    let attributes = ast_attributes_to_semantic(syntax_db, struct_ast.attributes(syntax_db));
+    let resolved_lookback = Arc::new(resolver.lookback);
+
+    Some(StructData {
+        diagnostics: diagnostics.build(),
+        generic_params,
+        members,
+        attributes,
+        resolved_lookback,
+    })
 }
 
 pub trait SemanticStructEx<'a>: Upcast<dyn SemanticGroup + 'a> {

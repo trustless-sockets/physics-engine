@@ -44,11 +44,11 @@ pub fn lower_expr_if(
     log::trace!("Started lowering of an if expression.");
     match analyze_condition(ctx, expr.condition) {
         IfCondition::BoolExpr(_) => lower_expr_if_bool(ctx, scope, expr),
-        IfCondition::Eq(expr_a, expr_b) => lower_expr_if_eq_zero(ctx, scope, expr, expr_a, expr_b),
+        IfCondition::Eq(expr_a, expr_b) => lower_expr_if_eq(ctx, scope, expr, expr_a, expr_b),
     }
 }
 
-/// Lowers an expression of type [semantic::ExprIf].
+/// Lowers an expression of type [semantic::ExprIf], for the case of [IfCondition::BoolExpr].
 pub fn lower_expr_if_bool(
     ctx: &mut LoweringContext<'_>,
     scope: &mut BlockScope,
@@ -68,6 +68,7 @@ pub fn lower_expr_if_bool(
                 ctx,
                 subscope,
                 extract_matches!(&ctx.function_def.exprs[expr.if_block], semantic::Expr::Block),
+                false,
             )
         });
         let else_block_scope = merger.run_in_subscope(ctx, vec![unit_ty], |ctx, subscope, _| {
@@ -96,8 +97,8 @@ pub fn lower_expr_if_bool(
     lowered_expr_from_block_result(scope, block_result, finalized_merger)
 }
 
-/// Lowers an expression of type [semantic::ExprIf].
-pub fn lower_expr_if_eq_zero(
+/// Lowers an expression of type [semantic::ExprIf], for the case of [IfCondition::Eq].
+pub fn lower_expr_if_eq(
     ctx: &mut LoweringContext<'_>,
     scope: &mut BlockScope,
     expr: &semantic::ExprIf,
@@ -132,6 +133,7 @@ pub fn lower_expr_if_eq_zero(
                 ctx,
                 subscope,
                 extract_matches!(&ctx.function_def.exprs[expr.if_block], semantic::Expr::Block),
+                false,
             )
         });
         let non_zero_type =
@@ -173,6 +175,7 @@ fn lower_optional_else_block(
             ctx,
             scope,
             extract_matches!(&ctx.function_def.exprs[else_block], semantic::Expr::Block),
+            false,
         ),
         None => lowered_expr_to_block_scope_end(ctx, scope, Ok(LoweredExpr::Tuple(vec![]))),
     }

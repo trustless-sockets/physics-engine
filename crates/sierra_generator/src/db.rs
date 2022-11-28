@@ -3,8 +3,10 @@ use std::sync::Arc;
 use db_utils::Upcast;
 use defs::ids::{FreeFunctionId, ModuleId};
 use diagnostics::Diagnostics;
+use filesystem::ids::CrateId;
 use lowering::db::LoweringGroup;
-use semantic::Mutability;
+use semantic::corelib::get_core_ty_by_name;
+use semantic::{GenericArgumentId, Mutability};
 use sierra::extensions::{ConcreteType, GenericTypeEx};
 use sierra::ids::ConcreteTypeId;
 
@@ -73,10 +75,6 @@ pub trait SierraGenGroup: LoweringGroup + Upcast<dyn LoweringGroup> {
         function_id: FreeFunctionId,
     ) -> Option<Arc<pre_sierra::Function>>;
 
-    /// Returns the [pre_sierra::Library] object for the given module.
-    #[salsa::invoke(program_generator::module_sierra_library)]
-    fn module_sierra_library(&self, module_id: ModuleId) -> Option<Arc<pre_sierra::Library>>;
-
     /// Returns the Sierra diagnostics of a module.
     #[salsa::invoke(program_generator::module_sierra_diagnostics)]
     fn module_sierra_diagnostics(
@@ -96,9 +94,19 @@ pub trait SierraGenGroup: LoweringGroup + Upcast<dyn LoweringGroup> {
     #[salsa::invoke(ap_change::get_ap_change)]
     fn get_ap_change(&self, function_id: FreeFunctionId) -> Option<ApChange>;
 
-    /// Returns the [sierra::program::Program] object of the loaded crates.
+    /// Returns the [sierra::program::Program] object of the requested functions.
+    #[salsa::invoke(program_generator::get_sierra_program_for_functions)]
+    fn get_sierra_program_for_functions(
+        &self,
+        requested_function_ids: Vec<FreeFunctionId>,
+    ) -> Option<Arc<sierra::program::Program>>;
+
+    /// Returns the [sierra::program::Program] object of the requested crates.
     #[salsa::invoke(program_generator::get_sierra_program)]
-    fn get_sierra_program(&self) -> Option<Arc<sierra::program::Program>>;
+    fn get_sierra_program(
+        &self,
+        requested_crate_ids: Vec<CrateId>,
+    ) -> Option<Arc<sierra::program::Program>>;
 }
 
 fn get_function_signature(
@@ -112,6 +120,7 @@ fn get_function_signature(
     // there.
     let semantic_function_id = db.lookup_intern_sierra_function(function_id);
     let signature = db.concrete_function_signature(semantic_function_id)?;
+    let may_panic = db.function_may_panic(semantic_function_id)?;
 
     let implicits = db
         .function_all_implicits(semantic_function_id)?
@@ -119,6 +128,7 @@ fn get_function_signature(
         .map(|ty| db.get_concrete_type_id(*ty))
         .collect::<Option<Vec<ConcreteTypeId>>>()?;
 
+    // TODO(spapini): Handle ret_types in lowering.
     let mut ret_types = implicits.clone();
     let mut all_params = implicits;
 
@@ -131,7 +141,15 @@ fn get_function_signature(
     }
 
     // TODO(ilya): Handle tuple and struct types.
-    ret_types.push(db.get_concrete_type_id(signature.return_type)?);
+    let mut return_type = signature.return_type;
+    if may_panic {
+        return_type = get_core_ty_by_name(
+            db.upcast(),
+            "PanicResult".into(),
+            vec![GenericArgumentId::Type(return_type)],
+        )
+    }
+    ret_types.push(db.get_concrete_type_id(return_type)?);
 
     Some(Arc::new(sierra::program::FunctionSignature { param_types: all_params, ret_types }))
 }
