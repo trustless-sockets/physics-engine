@@ -20,7 +20,11 @@ impl DebugWithDb<LoweredFormatter<'_>> for Lowered {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>, ctx: &LoweredFormatter<'_>) -> std::fmt::Result {
         for (block_id, block) in self.blocks.iter() {
             block_id.fmt(f, ctx)?;
-            writeln!(f, ":")?;
+            if self.root == Some(block_id) {
+                writeln!(f, " (root):")?;
+            } else {
+                writeln!(f, ":")?;
+            }
             block.fmt(f, ctx)?;
             writeln!(f)?;
         }
@@ -185,16 +189,16 @@ impl DebugWithDb<LoweredFormatter<'_>> for StatementMatchExtern {
             }
         }
         writeln!(f, ") {{")?;
-        for arm in &self.arms {
+        for (_, block_id) in &self.arms {
             write!(f, "    (")?;
-            let mut inputs = ctx.lowered.blocks[*arm].inputs.iter().peekable();
+            let mut inputs = ctx.lowered.blocks[*block_id].inputs.iter().peekable();
             while let Some(var) = inputs.next() {
                 var.fmt(f, ctx)?;
                 if inputs.peek().is_some() {
                     write!(f, ", ")?;
                 }
             }
-            writeln!(f, ") => {:?},", arm.debug(ctx))?;
+            writeln!(f, ") => {:?},", block_id.debug(ctx))?;
         }
         write!(f, "  }}")
     }

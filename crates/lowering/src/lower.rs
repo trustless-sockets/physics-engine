@@ -6,7 +6,7 @@ use num_traits::Zero;
 use scope::{BlockScope, BlockScopeEnd};
 use semantic::corelib::{
     core_felt_ty, core_jump_nz_func, core_nonzero_ty, get_core_function_id,
-    get_enum_concrete_variant, get_panic_ty,
+    get_enum_concrete_variant, get_panic_ty, jump_nz_nonzero_variant, jump_nz_zero_variant,
 };
 use semantic::items::enm::SemanticEnumEx;
 use semantic::items::imp::ImplLookupContext;
@@ -78,7 +78,7 @@ pub fn lower(db: &dyn LoweringGroup, free_function_id: FreeFunctionId) -> Option
         function_def: &function_def,
         signature,
         may_panic: db.free_function_may_panic(free_function_id)?,
-        diagnostics: LoweringDiagnostics::new(free_function_id.module(db.upcast())),
+        diagnostics: LoweringDiagnostics::new(free_function_id.module_file(db.upcast())),
         variables: Arena::default(),
         blocks: Arena::default(),
         semantic_defs: UnorderedHashMap::default(),
@@ -292,7 +292,7 @@ fn get_plain_full_return_vars(
     Ok(chain!(implicit_vars, ref_vars, value_vars).collect())
 }
 
-// TODO:(spapini): Separate match pattern from non-match (single) patterns in the semantic
+// TODO(spapini): Separate match pattern from non-match (single) patterns in the semantic
 // model.
 /// Lowers a single-pattern (pattern that does not appear in a match. This includes structs,
 /// tuples, variables, etc...
@@ -418,11 +418,11 @@ fn lower_expr_block(
     let block_finalized = finalized_merger.finalize_block(ctx, block_sealed);
 
     // Emit the statement.
-    let call_block_generator = generators::CallBlock {
+    let block_result = (generators::CallBlock {
         block: block_finalized.block,
         end_info: finalized_merger.end_info.clone(),
-    };
-    let block_result = call_block_generator.add(ctx, scope);
+    })
+    .add(ctx, scope);
     lowered_expr_from_block_result(scope, block_result, finalized_merger)
 }
 
@@ -589,20 +589,18 @@ fn lower_expr_match(
             // Create a sealed block for each arm.
             let block_opts =
                 zip_eq(&concrete_variants, &expr.arms).map(|(concrete_variant, arm)| {
+                    let input_tys = vec![concrete_variant.ty];
+
                     let semantic_var_id = extract_var_pattern(&arm.pattern, concrete_variant)?;
                     // Create a scope for the arm block.
-                    merger.run_in_subscope(
-                        ctx,
-                        vec![concrete_variant.ty],
-                        |ctx, subscope, variables| {
-                            // Bind the arm input variable to the semantic variable.
-                            let [var] = <[_; 1]>::try_from(variables).ok().unwrap();
-                            subscope.put_semantic_variable(semantic_var_id, var);
+                    merger.run_in_subscope(ctx, input_tys, |ctx, subscope, arm_imputs| {
+                        // Bind the arm input variable to the semantic variable.
+                        let [var] = <[_; 1]>::try_from(arm_imputs).ok().unwrap();
+                        subscope.put_semantic_variable(semantic_var_id, var);
 
-                            // Lower the arm expression.
-                            lower_tail_expr(ctx, subscope, arm.expression, false)
-                        },
-                    )
+                        // Lower the arm expression.
+                        lower_tail_expr(ctx, subscope, arm.expression, false)
+                    })
                 });
             block_opts.collect::<Option<Vec<_>>>().ok_or(LoweringFlowError::Failed)
         });
@@ -612,13 +610,13 @@ fn lower_expr_match(
     let arms = zip_eq(concrete_variants, finalized_blocks).collect();
 
     // Emit the statement.
-    let match_generator = generators::MatchEnum {
+    let block_result = (generators::MatchEnum {
         input: expr_var,
         concrete_enum_id,
         arms,
         end_info: finalized_merger.end_info.clone(),
-    };
-    let block_result = match_generator.add(ctx, scope);
+    })
+    .add(ctx, scope);
     lowered_expr_from_block_result(scope, block_result, finalized_merger)
 }
 
@@ -651,13 +649,16 @@ fn lower_optimized_extern_match(
 
                     // Create a scope for the arm block.
                     merger.run_in_subscope(ctx, input_tys, |ctx, subscope, mut arm_inputs| {
-                        match_extern_arm_ref_args_bind(&mut arm_inputs, &extern_enum, subscope);
-                        let variant_expr = extern_facade_expr(ctx, concrete_variant.ty, arm_inputs);
                         // TODO(spapini): Convert to a diagnostic.
                         let enum_pattern =
                             extract_matches!(&arm.pattern, semantic::Pattern::EnumVariant);
                         // TODO(spapini): Convert to a diagnostic.
                         assert_eq!(&enum_pattern.variant, concrete_variant, "Wrong variant");
+
+                        // Bind the arm inputs to implicits and semantic variables.
+                        match_extern_arm_ref_args_bind(&mut arm_inputs, &extern_enum, subscope);
+
+                        let variant_expr = extern_facade_expr(ctx, concrete_variant.ty, arm_inputs);
                         lower_single_pattern(
                             ctx,
                             subscope,
@@ -673,10 +674,13 @@ fn lower_optimized_extern_match(
         },
     );
 
-    let arms = blocks?
+    let finalized_blocks = blocks?
         .into_iter()
         .map(|sealed| finalized_merger.finalize_block(ctx, sealed).block)
-        .collect();
+        .collect_vec();
+    let arms = zip_eq(concrete_variants, finalized_blocks).collect();
+
+    // Emit the statement.
     let block_result = generators::MatchExtern {
         function: extern_enum.function,
         inputs: extern_enum.inputs,
@@ -740,14 +744,19 @@ fn lower_expr_match_felt(
     let block_otherwise_finalized = finalized_merger
         .finalize_block(ctx, block_otherwise_sealed.ok_or(LoweringFlowError::Failed)?);
 
+    let concrete_variants =
+        vec![jump_nz_zero_variant(ctx.db.upcast()), jump_nz_nonzero_variant(ctx.db.upcast())];
+    let arms = zip_eq(concrete_variants, [block0_finalized.block, block_otherwise_finalized.block])
+        .collect();
+
     // Emit the statement.
-    let match_generator = generators::MatchExtern {
+    let block_result = (generators::MatchExtern {
         function: core_jump_nz_func(semantic_db),
         inputs: vec![expr_var],
-        arms: vec![block0_finalized.block, block_otherwise_finalized.block],
+        arms,
         end_info: finalized_merger.end_info.clone(),
-    };
-    let block_result = match_generator.add(ctx, scope);
+    })
+    .add(ctx, scope);
     lowered_expr_from_block_result(scope, block_result, finalized_merger)
 }
 
@@ -968,13 +977,13 @@ fn lower_error_propagate(
     let arms = zip_eq([ok_variant.clone(), err_variant.clone()], finalized_blocks).collect();
 
     // Emit the statement.
-    let match_generator = generators::MatchEnum {
+    let block_result = (generators::MatchEnum {
         input: var,
         concrete_enum_id: ok_variant.concrete_enum_id,
         arms,
         end_info: finalized_merger.end_info.clone(),
-    };
-    let block_result = match_generator.add(ctx, scope);
+    })
+    .add(ctx, scope);
     lowered_expr_from_block_result(scope, block_result, finalized_merger)
 }
 
@@ -1037,7 +1046,10 @@ fn lower_optimized_extern_error_propagate(
             ])
         },
     );
-    let arms = blocks?.map(|sealed| finalized_merger.finalize_block(ctx, sealed).block).to_vec();
+    let finalized_blocks =
+        blocks?.map(|sealed| finalized_merger.finalize_block(ctx, sealed).block).to_vec();
+    let arms = zip_eq(vec![ok_variant.clone(), err_variant.clone()], finalized_blocks).collect();
+
     let block_result = generators::MatchExtern {
         function: extern_enum.function,
         inputs: extern_enum.inputs,

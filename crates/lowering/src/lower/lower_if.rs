@@ -84,7 +84,7 @@ pub fn lower_expr_if_bool(
         finalized_merger.finalize_block(ctx, else_block_sealed.ok_or(LoweringFlowError::Failed)?);
 
     // Emit the statement.
-    let match_generator = generators::MatchEnum {
+    let block_result = (generators::MatchEnum {
         input: condition_var,
         concrete_enum_id: corelib::core_bool_enum(semantic_db),
         arms: vec![
@@ -92,8 +92,8 @@ pub fn lower_expr_if_bool(
             (corelib::false_variant(semantic_db), else_finalized.block),
         ],
         end_info: finalized_merger.end_info.clone(),
-    };
-    let block_result = match_generator.add(ctx, scope);
+    })
+    .add(ctx, scope);
     lowered_expr_from_block_result(scope, block_result, finalized_merger)
 }
 
@@ -152,13 +152,16 @@ pub fn lower_expr_if_eq(
         finalized_merger.finalize_block(ctx, else_block_sealed.ok_or(LoweringFlowError::Failed)?);
 
     // Emit the statement.
-    let match_generator = generators::MatchExtern {
+    let block_result = (generators::MatchExtern {
         function: corelib::core_jump_nz_func(semantic_db),
         inputs: vec![condition_var],
-        arms: vec![main_finalized.block, else_finalized.block],
+        arms: vec![
+            (corelib::jump_nz_zero_variant(ctx.db.upcast()), main_finalized.block),
+            (corelib::jump_nz_nonzero_variant(ctx.db.upcast()), else_finalized.block),
+        ],
         end_info: finalized_merger.end_info.clone(),
-    };
-    let block_result = match_generator.add(ctx, scope);
+    })
+    .add(ctx, scope);
     lowered_expr_from_block_result(scope, block_result, finalized_merger)
 }
 
@@ -167,16 +170,18 @@ pub fn lower_expr_if_eq(
 fn lower_optional_else_block(
     ctx: &mut LoweringContext<'_>,
     scope: &mut BlockScope,
-    else_block_opt: Option<semantic::ExprId>,
+    else_expr_opt: Option<semantic::ExprId>,
 ) -> Option<BlockScopeEnd> {
     log::trace!("Started lowering of an optional else block.");
-    match else_block_opt {
-        Some(else_block) => lower_block(
-            ctx,
-            scope,
-            extract_matches!(&ctx.function_def.exprs[else_block], semantic::Expr::Block),
-            false,
-        ),
+    match else_expr_opt {
+        Some(else_expr) => match &ctx.function_def.exprs[else_expr] {
+            semantic::Expr::Block(block) => lower_block(ctx, scope, block, false),
+            semantic::Expr::If(if_expr) => {
+                let lowered_if = lower_expr_if(ctx, scope, if_expr);
+                lowered_expr_to_block_scope_end(ctx, scope, lowered_if)
+            }
+            _ => unreachable!(),
+        },
         None => lowered_expr_to_block_scope_end(ctx, scope, Ok(LoweredExpr::Tuple(vec![]))),
     }
 }
