@@ -21,3 +21,15 @@ func applyForce( obj: PhysicalObj, force: (felt, felt) ) -> PhysicalObj {
         velocity: (vx + ax, vy + ay),
     }
 }
+
+func updateObject( obj: PhysicalObj ) -> PhysicalObj {
+    let (x, y) = obj.position;
+    let (vx, vy) = obj.velocity;
+
+    PhysicalObj{
+        id: obj.id,
+        kind: obj.kind,
+        position: (x + vx, y + vy),
+        velocity: (vx, vy),
+    }
+}
