@@ -1,13 +1,9 @@
-struct Vector {
-    x: felt,
-    y: felt,
-}
-
 // The vectors could be pointers for easy updates
 // to avoid having to reallocate the whole struct.
+#[derive(Copy, Drop)]
 struct PhysicalObj {
+    id: felt,
     kind: felt,
-    position: Vector,
-    velocity: Vector,
-    // acceleration: Vector,
+    position: (felt, felt),
+    velocity: (felt, felt),
 }
